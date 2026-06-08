@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CyberSource Unified Checkout</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 60px auto; padding: 0 20px; }
+    h1 { font-size: 1.4rem; margin-bottom: 24px; }
+    label { display: block; margin-bottom: 4px; font-size: 0.85rem; color: #555; }
+    input { width: 100%; padding: 8px; margin-bottom: 16px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { padding: 10px 24px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    #payment-buttons { margin-top: 24px; min-height: 40px; }
+    #status { margin-top: 16px; padding: 10px; border-radius: 4px; display: none; }
+    #status.success { background: #e6f4ea; color: #1a7f37; display: block; }
+    #status.error   { background: #fdecea; color: #c0392b; display: block; }
+    #status.info    { background: #e8f0fe; color: #1a56db; display: block; }
+  </style>
+</head>
+<body>
+  <h1>CyberSource Unified Checkout</h1>
+
+  <label>Amount</label>
+  <input id="amount" type="text" value="1.00" />
+
+  <label>Currency</label>
+  <input id="currency" type="text" value="USD" />
+
+  <button id="launch-btn" onclick="startCheckout()">Launch Checkout</button>
+
+  <!-- Unified Checkout mounts payment method buttons here -->
+  <div id="payment-buttons"></div>
+
+  <div id="status"></div>
+
+  <script>
+    function setStatus(type, message) {
+      const el = document.getElementById('status');
+      el.className = type;
+      el.textContent = message;
+    }
+
+    async function sendToServer(transientTokenJwt, totalAmount, currency) {
+      setStatus('info', 'Submitting payment…');
+      const res = await fetch('/api/pay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transientTokenJwt, totalAmount, currency }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Payment request failed');
+
+      console.log('Payment result:', data);
+      if (data.status === 'AUTHORIZED' || data.status === 'PENDING') {
+        setStatus('success', `Payment ${data.status} — ID: ${data.id}${data.reconciliationId ? ' · Reconciliation: ' + data.reconciliationId : ''}`);
+      } else {
+        const detail = data.errorInformation?.message ?? data.status ?? 'Unknown status';
+        setStatus('error', `Payment not authorized: ${detail}`);
+      }
+    }
+
+    function handleError(reason, message) {
+      console.error('CheckoutError:', reason, message);
+      setStatus('error', `Error [${reason}]: ${message}`);
+    }
+
+    function loadScript(src, integrity) {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+        const script = document.createElement('script');
+        script.src = src;
+        if (integrity) { script.integrity = integrity; script.crossOrigin = 'anonymous'; }
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Failed to load ${src}`));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function launchCheckout(sessionJWT, clientLibrary, clientLibraryIntegrity, totalAmount, currency) {
+      await loadScript(clientLibrary, clientLibraryIntegrity);
+
+      const client = await Accept(sessionJWT);
+      const payments = await client.unifiedPayments();
+      const result = await payments.show({
+        containers: { paymentSelection: '#payment-buttons' },
+      });
+      await sendToServer(result, totalAmount, currency);
+    }
+
+    async function startCheckout() {
+      const btn = document.getElementById('launch-btn');
+      btn.disabled = true;
+      document.getElementById('status').className = '';
+      document.getElementById('status').style.display = 'none';
+
+      const totalAmount = document.getElementById('amount').value;
+      const currency    = document.getElementById('currency').value;
+
+      try {
+        const res = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ totalAmount, currency }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.sessionJWT) {
+          throw new Error(data.error || 'Failed to get session JWT');
+        }
+        if (!data.clientLibrary) {
+          throw new Error('No clientLibrary URL in JWT — cannot load payment script');
+        }
+
+        await launchCheckout(data.sessionJWT, data.clientLibrary, data.clientLibraryIntegrity, totalAmount, currency);
+      } catch (err) {
+        handleError(err.reason || 'LOAD_ERROR', err.message || String(err));
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
