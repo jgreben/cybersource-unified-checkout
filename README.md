@@ -6,10 +6,10 @@ A minimal Node.js/Express app for testing the CyberSource Unified Checkout payme
 
 1. **Browser** — user enters an amount and clicks Launch Checkout
 2. **`POST /api/session`** — server generates a signed capture context JWT via `POST /up/v1/capture-contexts` using the `cybersource-rest-client` SDK
-3. **Browser** — dynamically loads `SecureAcceptance.js` from the URL embedded in the JWT, calls `Accept(jwt)` → `unifiedPayments()` → `show()` to render the card-entry iframes
-4. **Browser** — on completion, receives a transient token JWT and POSTs it to the server
-5. **`POST /api/pay`** — server submits the transient token to `POST /pts/v2/payments`, authorizing and capturing the payment
-6. **`GET /api/transaction/:id`** — retrieve full transaction details including `merchantDefinedInformation`. The :`id` can be found in the browser console payment response.
+3. **Browser** — dynamically loads `SecureAcceptance.js` from the `clientLibrary` URL embedded in the JWT, then calls `Accept(jwt)` → `unifiedPayments(sidebar)` → `show()` → `complete()` to render the card-entry iframes and collect payment
+4. **Browser** — on completion, POSTs the final response token to the server
+5. **`POST /api/pay`** — server submits the token to `POST /pts/v2/payments`, authorizing and capturing the payment
+6. **`GET /api/transaction/:id`** — retrieve full transaction details including `merchantDefinedInformation`. The `:id` can be found in the browser console payment response.
 
 ## Setup
 
@@ -51,32 +51,35 @@ Test card: `4111 1111 1111 1111`, any future expiry, any CVV.
 | `POST` | `/api/pay` | Authorize & capture via transient token |
 | `GET`  | `/api/transaction/:id` | Retrieve full transaction record |
 
-## How this differs from the VAS 1.0.0 flow
+## Client library
 
-CyberSource has two generations of the Unified Checkout JavaScript SDK:
+The capture context JWT returned by `POST /up/v1/capture-contexts` embeds a `clientLibrary` URL pointing to `SecureAcceptance.js` — CyberSource's 0.x Unified Checkout SDK. The browser loads this script dynamically (with SRI integrity check) rather than from a static script tag, ensuring the library version always matches the JWT.
 
-| | This app (0.x) | VAS 1.0.0 |
+`clientVersion` in `server.js` controls which JWT format is returned. This app uses `0.26`, which is the version used by the [official CyberSource sample](https://github.com/CyberSource/cybersource-unified-checkout-sample-node).
+
+### Method chain
+
+```javascript
+const client   = await Accept(sessionJWT);           // verify JWT, return client
+const payments = await client.unifiedPayments(true); // true = sidebar layout
+const token    = await payments.show({               // render iframes, collect card
+  containers: { paymentSelection: '#payment-buttons' }
+});
+const response = await payments.complete(token);     // finalise, return response JWT
+```
+
+`show()` resolves when the customer completes card entry and returns a transient token. `complete()` takes that token, finalises the session, and returns the response JWT that is submitted to `POST /pts/v2/payments`. The `sidebar` boolean passed to `unifiedPayments()` controls whether the card-entry form opens inline (`false`) or in a sidebar panel (`true`).
+
+### VAS 1.0.0 (`VAS.UnifiedCheckout`)
+
+CyberSource's documentation references a `VAS.UnifiedCheckout` API served from `UnifiedCheckout.js`. This uses a different method chain (`.createCheckout()` → `.mount()`) and a different JWT format that includes an `iframes.orc` orchestrator key. The official CyberSource sample app does **not** use this API — it uses the same `Accept` flow described above. Both API versions are present in `index.html`, one active and one commented out, to make switching straightforward if a compatible `clientVersion` becomes available.
+
+| | 0.x / `Accept` (current) | VAS 1.0.0 |
 |---|---|---|
-| Capture context endpoint | `POST /up/v1/capture-contexts` | Same |
-| `clientVersion` | `0.10`–`0.20` | Requires `iframes.orc` in JWT (not produced by 0.x) |
-| Client library | `SecureAcceptance.js` (embedded in JWT) | `UnifiedCheckout.js` (static script tag) |
+| Script tag | dynamic, loaded from JWT `clientLibrary` | static `<script src=".../UnifiedCheckout.js">` |
 | Entry point | `Accept(jwt)` | `VAS.UnifiedCheckout(jwt)` |
-| Method chain | `.unifiedPayments()` → `.show({containers})` | `.createCheckout()` → `.mount('#selector')` |
-| Assets host | `testup.cybersource.com` | `apitest.cybersource.com` |
-
-The 1.0.0 library (`VAS.UnifiedCheckout`) expects a key called `iframes.orc` (an orchestrator iframe) in the capture context JWT. No 0.x `clientVersion` produces this key, making the two generations incompatible. The 0.x generation works end-to-end and is what this app uses.
-
-### Switching between flows
-
-Three places in `public/index.html` must be toggled together:
-
-| | 0.x flow (default) | VAS 1.0.0 flow |
-|---|---|---|
-| Script tag | `loadScript` helper block (dynamic, from JWT) | `<script src=".../UnifiedCheckout.js">` (static) |
-| `launchCheckout` | `Accept` → `unifiedPayments()` → `show()` | `VAS.UnifiedCheckout` → `createCheckout()` → `mount()` |
-| `startCheckout` call | passes `clientLibrary`, `clientLibraryIntegrity` | no `clientLibrary` args |
-
-Both versions are present in `index.html` — one active, one commented out. `server.js` also has a comment on `clientVersion` noting what value would be needed for the VAS flow.
+| Method chain | `unifiedPayments(sidebar)` → `show()` → `complete()` | `createCheckout()` → `mount('#selector')` |
+| `clientLibrary` args | required | not needed |
 
 ## Appearance customization
 
