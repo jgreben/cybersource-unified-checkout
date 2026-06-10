@@ -99,24 +99,6 @@
       await sendToServer(completeResponse, totalAmount, currency);
     }
 
-    // ── VAS 1.0.0 flow ───────────────────────────────────────────────────────────
-    // Requires UnifiedCheckout.js static script tag above and a clientVersion that
-    // produces iframes.orc in the capture context JWT.
-    /*
-    async function launchCheckout(sessionJWT, totalAmount, currency) {
-      let client, checkout;
-      try {
-        client   = await VAS.UnifiedCheckout(sessionJWT);
-        checkout = await client.createCheckout();
-        const result = await checkout.mount('#payment-buttons');
-        await sendToServer(result, totalAmount, currency);
-      } finally {
-        if (checkout) checkout.destroy();
-        if (client)   client.destroy();
-      }
-    }
-    */
-
     async function startCheckout() {
       const btn = document.getElementById('launch-btn');
       btn.disabled = true;
