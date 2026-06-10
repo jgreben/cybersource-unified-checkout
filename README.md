@@ -20,15 +20,25 @@ npm install
 
 Credentials come from [Business Center (test)](https://businesscentertest.cybersource.com/ebc2) under Payment Configuration → Key Management → Generate Key (REST - Shared Secret).
 
-CyberSource requires an HTTPS origin in `targetOrigins`. For local development use ngrok:
+CyberSource requires an HTTPS origin in `targetOrigins`. Two options for local development:
 
+**Option A — ngrok** (simpler, no setup):
 ```bash
 npx ngrok http 3000
 # paste the https://xxxx.ngrok-free.app URL into .env as ORIGIN_URL
+npm start
 ```
+Drawback: the ngrok URL changes every restart (unless you have a paid static domain), so you must update `ORIGIN_URL` and restart the server each session.
+
+**Option B — self-signed certificate** (no external dependency, stable URL):
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes \
+  -subj "/CN=localhost"
+```
+Then set `ORIGIN_URL=https://localhost:3000` in `.env`. The browser will show a certificate warning on first visit — click through it (the cert is valid for CyberSource's purposes). Add `key.pem` and `cert.pem` to `.gitignore`. This approach matches what the official CyberSource sample app does.
 
 ```bash
-npm start   # http://localhost:3000
+npm start
 ```
 
 Test card: `4111 1111 1111 1111`, any future expiry, any CVV.
@@ -55,6 +65,18 @@ CyberSource has two generations of the Unified Checkout JavaScript SDK:
 | Assets host | `testup.cybersource.com` | `apitest.cybersource.com` |
 
 The 1.0.0 library (`VAS.UnifiedCheckout`) expects a key called `iframes.orc` (an orchestrator iframe) in the capture context JWT. No 0.x `clientVersion` produces this key, making the two generations incompatible. The 0.x generation works end-to-end and is what this app uses.
+
+### Switching between flows
+
+Three places in `public/index.html` must be toggled together:
+
+| | 0.x flow (default) | VAS 1.0.0 flow |
+|---|---|---|
+| Script tag | `loadScript` helper block (dynamic, from JWT) | `<script src=".../UnifiedCheckout.js">` (static) |
+| `launchCheckout` | `Accept` → `unifiedPayments()` → `show()` | `VAS.UnifiedCheckout` → `createCheckout()` → `mount()` |
+| `startCheckout` call | passes `clientLibrary`, `clientLibraryIntegrity` | no `clientLibrary` args |
+
+Both versions are present in `index.html` — one active, one commented out. `server.js` also has a comment on `clientVersion` noting what value would be needed for the VAS flow.
 
 ## Appearance customization
 

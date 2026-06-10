@@ -17,6 +17,7 @@ function makeSdkConfig() {
     merchantKeyId: process.env.KEY_ID,
     merchantsecretKey: process.env.SHARED_SECRET,
     runEnvironment: CYBS_HOST,
+    logConfiguration: { enableLog: false },
   };
 }
 
@@ -29,7 +30,7 @@ app.post('/api/session', (req, res) => {
   const { totalAmount = '21.12', currency = 'USD' } = req.body;
 
   const requestObj = new CyberSource.GenerateUnifiedCheckoutCaptureContextRequest();
-  requestObj.clientVersion = '0.20'; // 0.x flow: valid values 0.10–0.20
+  requestObj.clientVersion = '0.26'; // 0.x flow: official sample uses 0.26
   // VAS 1.0.0 flow: replace with a clientVersion that produces iframes.orc in the JWT.
   // No known public value exists yet — contact CyberSource support to have it enabled.
   requestObj.targetOrigins = [process.env.ORIGIN_URL || `http://localhost:${PORT}`];
